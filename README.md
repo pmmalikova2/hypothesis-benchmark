@@ -1,2 +1,2 @@
 # hypothesis-benchmark
-Benchmark for hypothesis and conclusion generation in machine learning tasks
+Бенчмарк генерации гипотез и выводов в задачах анализа данных
