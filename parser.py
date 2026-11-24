@@ -1,34 +1,48 @@
-
 import json
 from pathlib import Path
 
-from kaggle.api.kaggle_api_extended import KaggleApi
-from kagglesdk.kernels.types.kernels_api_service import ApiGetKernelRequest, ApiDownloadKernelOutputRequest
-from kagglesdk.datasets.types.dataset_api_service import ApiGetDatasetRequest
-from kagglesdk.competitions.types.competition_api_service import ApiGetCompetitionRequest
-from langdetect import detect, LangDetectException
+from langdetect import detect, DetectorFactory, LangDetectException
+
+DetectorFactory.seed = 0
 
 # auto проверяет и скачивает подходящие ноутбуки
 # manual скачивает выбранный ноутбук
 # review проверяет сохраненные ноутбуки
-MODE = "review"
+MODE = "auto"
 
 NOTEBOOK = "dmitryalexandrovski/titanic-from-baseline-to-statistical-validation"
 COMPETITION = "titanic"
 LIMIT = 20
 DOWNLOAD_CSV = True
+MIN_VOTES = None
+SORT_BY = "hotness"
+MIN_ANALYSIS_CELLS = 3
+
+if MODE not in ("auto", "manual", "review"):
+    raise ValueError("MODE должен быть auto, manual или review")
 
 analysis_words = (
     "describe(", "groupby(", "value_counts(",
-    "corr(", "plot(", "hist(", "sns.",
-    "plt.", "pivot_table(", "scatter("
+    "corr(", "plot(", "hist(", "barplot(",
+    "boxplot(", "heatmap(", "countplot(",
+    "pivot_table(", "crosstab(", "scatter("
+)
+
+data_analysis_words = (
+    "describe(", "groupby(", "value_counts(",
+    "corr(", "pivot_table(", "crosstab("
+)
+
+conclusion_words = (
+    "conclusion", "insight", "finding", "observation", "hypothes",
+    "answer", "suggest", "вывод", "гипотез", "наблюдени"
 )
 
 
 # сохраняет json
 def save_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as file:
+    with open(path, "w", encoding="utf-8") as file:
         json.dump(data, file, indent=2, ensure_ascii=False)
 
 
@@ -58,7 +72,8 @@ def get_files(name, kind):
 
 # определяет язык текста
 def get_language(cells):
-    text = " ".join("".join(cell["source"]) for cell in cells)
+    texts = ["".join(cell["source"]) for cell in cells]
+    text = " ".join(texts)
 
     if len(text.strip()) < 100:
         return "unknown"
@@ -68,7 +83,78 @@ def get_language(cells):
     except LangDetectException:
         return "unknown"
 
-    return language if language in ("ru", "en") else "other"
+    if language in ("ru", "en"):
+        return language
+    return "other"
+
+
+def review_notebook(notebook, votes=None, check_outputs=True):
+    text = []
+    code_cells = 0
+    explanations = 0
+    analysis = 0
+    data_analysis = 0
+    conclusions = 0
+    outputs = 0
+    errors = 0
+
+    for cell in notebook["cells"]:
+        content = "".join(cell["source"]).lower()
+
+        if cell["cell_type"] == "markdown":
+            text.append(cell)
+            if len(content.strip()) > 100:
+                explanations += 1
+                if any(word in content for word in conclusion_words):
+                    conclusions += 1
+
+        elif cell["cell_type"] == "code":
+            code_cells += 1
+            if any(word in content for word in analysis_words):
+                analysis += 1
+            if any(word in content for word in data_analysis_words):
+                data_analysis += 1
+            if cell.get("outputs"):
+                outputs += 1
+            for output in cell.get("outputs", []):
+                if output.get("output_type") == "error":
+                    errors += 1
+                    break
+
+    language = get_language(text)
+
+    reasons = []
+    if language not in ("ru", "en"):
+        reasons.append("Язык текста не русский и не английский")
+    if explanations < 2:
+        reasons.append("Меньше двух развернутых пояснений")
+    if analysis < MIN_ANALYSIS_CELLS:
+        reasons.append(f"Меньше {MIN_ANALYSIS_CELLS} ячеек анализа")
+    if data_analysis < 1:
+        reasons.append("Нет операций анализа таблицы: groupby, corr, describe и подобных")
+    if conclusions < 1:
+        reasons.append("Не найдены развернутые выводы или обсуждение результатов")
+    if check_outputs and outputs == 0:
+        reasons.append("Нет сохраненных результатов выполнения")
+    if check_outputs and errors:
+        reasons.append("В результатах выполнения есть ошибки")
+    if MIN_VOTES is not None and (votes is None or votes < MIN_VOTES):
+        reasons.append(f"Меньше {MIN_VOTES} голосов или число голосов неизвестно")
+
+    return {
+        "text_language": language,
+        "code_cells": code_cells,
+        "text_cells": len(text),
+        "explanation_cells": explanations,
+        "analysis_cells": analysis,
+        "data_analysis_cells": data_analysis,
+        "conclusion_cells": conclusions,
+        "output_cells": outputs,
+        "error_cells": errors,
+        "votes": votes,
+        "candidate": not reasons,
+        "reasons": reasons
+    }
 
 
 # скачивает csv если их еще нет
@@ -94,6 +180,11 @@ def download_csv(name, kind, files, folder):
 
 
 if MODE != "review":
+    from kaggle.api.kaggle_api_extended import KaggleApi
+    from kagglesdk.kernels.types.kernels_api_service import ApiGetKernelRequest, ApiDownloadKernelOutputRequest
+    from kagglesdk.datasets.types.dataset_api_service import ApiGetDatasetRequest
+    from kagglesdk.competitions.types.competition_api_service import ApiGetCompetitionRequest
+
     api = KaggleApi()
     api.authenticate()
     client = api.build_kaggle_client()
@@ -105,13 +196,17 @@ if MODE != "review":
             competition=COMPETITION,
             language="python",
             kernel_type="notebook",
-            page_size=LIMIT
+            page_size=LIMIT,
+            sort_by=SORT_BY
         )
         notebooks = [item.ref for item in results or []]
 
     for notebook in notebooks:
         owner, name = notebook.split("/")
         folder = Path("data/notebooks") / COMPETITION / owner / name
+
+        if MODE == "auto" and (folder / (name + ".ipynb")).exists():
+            continue
 
         request = ApiGetKernelRequest()
         request.user_name = owner
@@ -120,35 +215,13 @@ if MODE != "review":
         response = client.kernels.kernels_api_client.get_kernel(request)
         info = response.metadata
 
-        # проверяет текст и анализ до скачивания результатов
         if MODE == "auto":
             source = json.loads(response.blob.source)
 
-            text = [
-                cell for cell in source["cells"]
-                if cell["cell_type"] == "markdown"
-            ]
-
-            code = [
-                "".join(cell["source"]).lower()
-                for cell in source["cells"]
-                if cell["cell_type"] == "code"
-            ]
-
-            explanations = sum(
-                len("".join(cell["source"]).strip()) > 100
-                for cell in text
-            )
-
-            analysis = sum(
-                any(word in content for word in analysis_words)
-                for content in code
-            )
-
-            if get_language(text) not in ("ru", "en") or explanations < 2 or analysis == 0:
+            review = review_notebook(source, info.total_votes, check_outputs=False)
+            if not review["candidate"]:
                 continue
 
-        # скачивает выполненный ноутбук
         request = ApiDownloadKernelOutputRequest()
         request.owner_slug = owner
         request.kernel_slug = name
@@ -159,8 +232,14 @@ if MODE != "review":
             response.raise_for_status()
             content = response.content
 
-        if "cells" not in json.loads(content):
+        downloaded = json.loads(content)
+        if not isinstance(downloaded.get("cells"), list):
             raise ValueError("Скачанный файл не является ноутбуком")
+
+        if MODE == "auto":
+            review = review_notebook(downloaded, info.total_votes)
+            if not review["candidate"]:
+                continue
 
         folder.mkdir(parents=True, exist_ok=True)
         (folder / (name + ".ipynb")).write_bytes(content)
@@ -220,39 +299,26 @@ if MODE != "review":
 
 
 if MODE in ("auto", "review"):
-    conclusion_words = (
-        "conclusion", "insight", "finding",
-        "observation", "hypothesis", "вывод"
-    )
-
     report = []
 
-    for path in Path("data/notebooks").rglob("*.ipynb"):
-        with open(path) as file:
-            notebook = json.load(file)
+    for path in sorted(Path("data/notebooks").rglob("*.ipynb")):
+        try:
+            with open(path, encoding="utf-8") as file:
+                notebook = json.load(file)
 
-        code = [cell for cell in notebook["cells"] if cell["cell_type"] == "code"]
-        text = [cell for cell in notebook["cells"] if cell["cell_type"] == "markdown"]
+            metadata_path = path.parent / "metadata.json"
+            metadata = {}
+            if metadata_path.exists():
+                with open(metadata_path, encoding="utf-8") as file:
+                    metadata = json.load(file)
 
-        code_text = ["".join(cell["source"]).lower() for cell in code]
-        markdown_text = ["".join(cell["source"]).lower() for cell in text]
+            review = review_notebook(notebook, metadata.get("votes"))
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            review = {"candidate": False, "reasons": [f"Не удалось проверить файл: {error}"]}
 
-        explanations = sum(len(content.strip()) > 100 for content in markdown_text)
-        analysis = sum(any(word in content for word in analysis_words) for content in code_text)
-        conclusions = sum(any(word in content for word in conclusion_words) for content in markdown_text)
-        outputs = sum(bool(cell.get("outputs")) for cell in code)
-        language = get_language(text)
+        item = {"notebook": str(path)}
+        item.update(review)
+        report.append(item)
 
-        report.append({
-            "notebook": str(path),
-            "text_language": language,
-            "code_cells": len(code),
-            "text_cells": len(text),
-            "explanation_cells": explanations,
-            "analysis_cells": analysis,
-            "conclusion_cells": conclusions,
-            "output_cells": outputs,
-            "candidate": language in ("ru", "en") and explanations >= 2 and analysis >= 1
-        })
-
+    report.sort(key=lambda item: (item["candidate"], item.get("votes") or 0), reverse=True)
     save_json(Path("data/review.json"), report)
