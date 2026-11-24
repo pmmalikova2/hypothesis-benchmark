@@ -218,3 +218,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local data and credentials
+data/
+.venv/
+*.pyc
+.env.*
+.kaggle/
+kaggle.json
+access_token
+credentials.json
