@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 from langdetect import detect, DetectorFactory, LangDetectException
@@ -11,12 +12,27 @@ DetectorFactory.seed = 0
 MODE = "auto"
 
 NOTEBOOK = "dmitryalexandrovski/titanic-from-baseline-to-statistical-validation"
-COMPETITION = "titanic"
-LIMIT = 20
+COMPETITION = "bike-sharing-demand"
+LIMIT = 50
 DOWNLOAD_CSV = True
 MIN_VOTES = None
-SORT_BY = "hotness"
+SORT_BY = "voteCount"
 MIN_ANALYSIS_CELLS = 3
+EXCLUDED_NOTEBOOKS = [
+    "muhammadaslamjaved/logistic-regression-the-mathematics-of-titanic",
+    "muhammadaslamjaved/knn-from-scratch-learning-by-similarity",
+    "muhammadaslamjaved/decision-trees-the-mathematics-of-splitting",
+    "danielsowah123/titanic-survival-prediction",
+    "mjasimrizwan/titanic-eda-survival-analysis-with-pandas-seaborn",
+    "dahmanimarouamanar/house-prices-prediction",
+    "ismailuzum/house-prices-pytorch-mlp",
+    "roshaaann30/house-price-prediction-with-xgboost",
+    "golu1234567jat/house-price-prediction-feature-engineering",
+    "sheharyaaarr/house-price-xg-boost",
+    "aliderakhshesh/bike-sharing-a-simple-start-point",
+    "fatmakursun/bike-sharing-feature-engineering",
+    "homayoonkhadivi/2-creative-deep-learning-models-bike-prediction"
+]
 
 if MODE not in ("auto", "manual", "review"):
     raise ValueError("MODE должен быть auto, manual или review")
@@ -33,9 +49,37 @@ data_analysis_words = (
     "corr(", "pivot_table(", "crosstab("
 )
 
+hypothesis_words = (
+    "hypoth", "i suspect", "we suspect", "we expect", "we assume",
+    "may indicate", "suggests a potential", "i would expect",
+    "гипотез", "предполага", "ожида",
+    "test whether", "evaluate whether", "determine whether",
+    "examine whether", "question was raised",
+    "can lead", "could improve", "could reduce",
+    "should improve", "should reduce", "might explain", "проверим"
+)
+
 conclusion_words = (
-    "conclusion", "insight", "finding", "observation", "hypothes",
-    "answer", "suggest", "вывод", "гипотез", "наблюдени"
+    "conclusion", "insight", "finding", "observation",
+    "**answer", "confirmed", "rejected", "we found", "we observed",
+    "the results show", "improved", "improvement", "worsened",
+    "we find", "we can see", "we can conclude", "we see",
+    "this indicates", "this suggests", "shows that",
+    "the chart reveals", "this chart", "supports our hypothesis",
+    "findings of", "performance gain", "вывод", "заключени",
+    "performs", "cut the error", "подтверд", "отверг", "получили",
+    "улучшил", "ухудш", "показал"
+)
+
+output_words = (
+    "rmse", "p-value", "p_value", "f-stat", "t-stat", "accuracy",
+    "cv ", "score", "improvement", "ошибка"
+)
+
+unfinished_words = (
+    "(fill in)", "[fill in]", "**fill in**", "fill in.",
+    "write your own conclusion", "to adapt with your own numbers",
+    "заполните вывод", "впишите результат"
 )
 
 
@@ -96,10 +140,16 @@ def review_notebook(notebook, votes=None, check_outputs=True):
     data_analysis = 0
     conclusions = 0
     outputs = 0
+    result_paragraphs = 0
     errors = 0
+    hypothesis_fragments = []
+    result_fragments = []
+    unfinished_conclusions = []
+    conclusion_level = 0
 
-    for cell in notebook["cells"]:
-        content = "".join(cell["source"]).lower()
+    for number, cell in enumerate(notebook["cells"], start=1):
+        source = "".join(cell["source"])
+        content = source.lower()
 
         if cell["cell_type"] == "markdown":
             text.append(cell)
@@ -107,6 +157,31 @@ def review_notebook(notebook, votes=None, check_outputs=True):
                 explanations += 1
                 if any(word in content for word in conclusion_words):
                     conclusions += 1
+
+            for line in source.splitlines():
+                line = line.strip()
+                if line.startswith("#"):
+                    level = len(line) - len(line.lstrip("#"))
+                    if any(word in line.lower() for word in ("conclusion", "вывод", "заключени", "итог")):
+                        conclusion_level = level
+                    elif conclusion_level and level <= conclusion_level:
+                        conclusion_level = 0
+                if conclusion_level and any(word in line.lower() for word in unfinished_words):
+                    unfinished_conclusions.append({"cell": number, "text": line[:600]})
+
+            clean_source = re.sub(r"<[^>]*>", " ", source)
+            for paragraph in clean_source.split("\n\n"):
+                paragraph = paragraph.strip()
+                if len(paragraph) < 40:
+                    continue
+                lower = paragraph.lower()
+                if len(hypothesis_fragments) < 3 and any(word in lower for word in hypothesis_words):
+                    hypothesis_fragments.append({"cell": number, "text": paragraph[:600]})
+                if analysis > 0 and (not check_outputs or outputs > 0) and any(word in lower for word in conclusion_words):
+                    if not any(word in lower for word in ("whether", "we will", "objective", "future", "could", "might", "let's test")):
+                        result_paragraphs += 1
+                        result_fragments.append({"cell": number, "kind": "markdown", "text": paragraph[:600]})
+                        result_fragments = result_fragments[-3:]
 
         elif cell["cell_type"] == "code":
             code_cells += 1
@@ -120,26 +195,26 @@ def review_notebook(notebook, votes=None, check_outputs=True):
                 if output.get("output_type") == "error":
                     errors += 1
                     break
+                output_text = "".join(output.get("text", []))
+                if not output_text:
+                    output_text = "".join(output.get("data", {}).get("text/plain", []))
+                if output_text.strip() and ("score_dataset(" in content or any(word in output_text.lower() for word in output_words)):
+                    result_fragments.append({"cell": number, "kind": "output", "text": output_text[:600]})
+                    result_fragments = result_fragments[-3:]
 
     language = get_language(text)
-
-    reasons = []
-    if language not in ("ru", "en"):
-        reasons.append("Язык текста не русский и не английский")
-    if explanations < 2:
-        reasons.append("Меньше двух развернутых пояснений")
-    if analysis < MIN_ANALYSIS_CELLS:
-        reasons.append(f"Меньше {MIN_ANALYSIS_CELLS} ячеек анализа")
-    if data_analysis < 1:
-        reasons.append("Нет операций анализа таблицы: groupby, corr, describe и подобных")
-    if conclusions < 1:
-        reasons.append("Не найдены развернутые выводы или обсуждение результатов")
-    if check_outputs and outputs == 0:
-        reasons.append("Нет сохраненных результатов выполнения")
-    if check_outputs and errors:
-        reasons.append("В результатах выполнения есть ошибки")
+    candidate = (
+        language in ("ru", "en")
+        and explanations >= 2
+        and analysis >= MIN_ANALYSIS_CELLS
+        and data_analysis > 0
+        and result_paragraphs > 0
+        and not unfinished_conclusions
+    )
+    if check_outputs and (outputs == 0 or errors > 0):
+        candidate = False
     if MIN_VOTES is not None and (votes is None or votes < MIN_VOTES):
-        reasons.append(f"Меньше {MIN_VOTES} голосов или число голосов неизвестно")
+        candidate = False
 
     return {
         "text_language": language,
@@ -150,10 +225,13 @@ def review_notebook(notebook, votes=None, check_outputs=True):
         "data_analysis_cells": data_analysis,
         "conclusion_cells": conclusions,
         "output_cells": outputs,
+        "result_paragraphs": result_paragraphs,
         "error_cells": errors,
+        "hypothesis_fragments": hypothesis_fragments,
+        "result_fragments": result_fragments,
+        "unfinished_conclusions": unfinished_conclusions,
         "votes": votes,
-        "candidate": not reasons,
-        "reasons": reasons
+        "candidate": candidate
     }
 
 
@@ -202,6 +280,9 @@ if MODE != "review":
         notebooks = [item.ref for item in results or []]
 
     for notebook in notebooks:
+        if MODE == "auto" and notebook in EXCLUDED_NOTEBOOKS:
+            continue
+
         owner, name = notebook.split("/")
         folder = Path("data/notebooks") / COMPETITION / owner / name
 
@@ -313,8 +394,12 @@ if MODE in ("auto", "review"):
                     metadata = json.load(file)
 
             review = review_notebook(notebook, metadata.get("votes"))
-        except (OSError, ValueError, KeyError, TypeError) as error:
-            review = {"candidate": False, "reasons": [f"Не удалось проверить файл: {error}"]}
+        except (OSError, ValueError, KeyError, TypeError):
+            review = {"candidate": False}
+
+        reference = path.parent.parent.name + "/" + path.parent.name
+        if reference in EXCLUDED_NOTEBOOKS:
+            review["candidate"] = False
 
         item = {"notebook": str(path)}
         item.update(review)
