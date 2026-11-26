@@ -1,0 +1,14 @@
+{
+  "id": 43483856,
+  "title": "#2. EDA (Exploratory Data Analysis) for beginner",
+  "author": "scottXchoo",
+  "url": "https://www.kaggle.com/code/scottxchoo/2-eda-exploratory-data-analysis-for-beginner",
+  "language": "python",
+  "type": "notebook",
+  "version": 5,
+  "votes": 47,
+  "datasets": [],
+  "competitions": [
+    "bike-sharing-demand"
+  ]
+}

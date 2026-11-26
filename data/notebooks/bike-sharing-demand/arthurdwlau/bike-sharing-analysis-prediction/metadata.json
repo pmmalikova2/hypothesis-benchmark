@@ -1,0 +1,14 @@
+{
+  "id": 18894379,
+  "title": "bike-sharing-analysis-prediction",
+  "author": "Arthur Lau",
+  "url": "https://www.kaggle.com/code/arthurdwlau/bike-sharing-analysis-prediction",
+  "language": "python",
+  "type": "notebook",
+  "version": 1,
+  "votes": 80,
+  "datasets": [],
+  "competitions": [
+    "bike-sharing-demand"
+  ]
+}

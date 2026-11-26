@@ -1,0 +1,14 @@
+{
+  "id": 143248878,
+  "title": "Titanic: From Baseline to Statistical Validation",
+  "author": "Dmitry",
+  "url": "https://www.kaggle.com/code/dmitryalexandrovski/titanic-from-baseline-to-statistical-validation",
+  "language": "python",
+  "type": "notebook",
+  "version": 1,
+  "votes": 3,
+  "datasets": [],
+  "competitions": [
+    "titanic"
+  ]
+}
