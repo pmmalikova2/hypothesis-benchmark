@@ -1,0 +1,14 @@
+{
+  "id": 51832460,
+  "title": "Bike Sharing Demand | Random Forest",
+  "author": "Suman Kunwar",
+  "url": "https://www.kaggle.com/code/sumn2u/bike-sharing-demand-random-forest",
+  "language": "python",
+  "type": "notebook",
+  "version": 10,
+  "votes": 34,
+  "datasets": [],
+  "competitions": [
+    "bike-sharing-demand"
+  ]
+}

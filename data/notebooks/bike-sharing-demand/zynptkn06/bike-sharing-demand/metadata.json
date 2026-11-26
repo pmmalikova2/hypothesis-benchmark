@@ -1,0 +1,14 @@
+{
+  "id": 114765120,
+  "title": "Bike Sharing Demand",
+  "author": "Zeynep Tekin",
+  "url": "https://www.kaggle.com/code/zynptkn06/bike-sharing-demand",
+  "language": "python",
+  "type": "notebook",
+  "version": 2,
+  "votes": 5,
+  "datasets": [],
+  "competitions": [
+    "bike-sharing-demand"
+  ]
+}

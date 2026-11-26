@@ -1,0 +1,14 @@
+{
+  "id": 65893739,
+  "title": "House Prices : Linear Regression ",
+  "author": "Pisit Janthawee",
+  "url": "https://www.kaggle.com/code/pisitjanthawee13/house-prices-linear-regression",
+  "language": "python",
+  "type": "notebook",
+  "version": 6,
+  "votes": 3,
+  "datasets": [],
+  "competitions": [
+    "house-prices-advanced-regression-techniques"
+  ]
+}

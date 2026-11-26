@@ -1,0 +1,14 @@
+{
+  "id": 41989058,
+  "title": "Predict count of Bike Sharing Demand",
+  "author": "Mai Hesham",
+  "url": "https://www.kaggle.com/code/maihesham103/predict-count-of-bike-sharing-demand",
+  "language": "python",
+  "type": "notebook",
+  "version": 4,
+  "votes": 34,
+  "datasets": [],
+  "competitions": [
+    "bike-sharing-demand"
+  ]
+}

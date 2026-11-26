@@ -1,0 +1,14 @@
+{
+  "id": 67894737,
+  "title": "Feature Engineering Course Application-HousePrices",
+  "author": "Mosab Osama",
+  "url": "https://www.kaggle.com/code/mosabos/feature-engineering-course-application-houseprices",
+  "language": "python",
+  "type": "notebook",
+  "version": 5,
+  "votes": 0,
+  "datasets": [],
+  "competitions": [
+    "house-prices-advanced-regression-techniques"
+  ]
+}
